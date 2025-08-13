@@ -1,7 +1,14 @@
-
-import re, os, json
+import re, os, json, urllib.parse, requests
 from PIL import Image
 import exifread
+from dotenv import load_dotenv
+from ajans_list import AJANS_VE_MEDYA_DOMAINS
+
+load_dotenv()  # .env varsa anahtarları okuyalım
+
+TINEYE_PUBLIC_KEY = os.getenv("TINEYE_PUBLIC_KEY")       # opsiyonel
+TINEYE_PRIVATE_KEY = os.getenv("TINEYE_PRIVATE_KEY")     # opsiyonel
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")                   # opsiyonel
 
 def read_bytes(path):
     with open(path, 'rb') as f:
@@ -91,7 +98,7 @@ def action_suggestions(category):
     if category == "All Rights Reserved":
         acts.append("Kullanmayın: Telif sahibinden yazılı izin alın.")
     elif category == "Belirsiz":
-        acts.append("Tersine görsel arama (TinEye/Google Lens/Yandex) ile orijinal kaynağı bulun.")
+        acts.append("Tersine görsel arama (TinEye/Google Lens/SerpAPI) ile orijinal kaynağı bulun.")
         acts.append("Kaynak sitede lisans şartlarını okuyun.")
     elif category.startswith("CC "):
         acts.append("Atıf metnini hazırlayın (Yazar, eser, lisans linki).")
@@ -117,17 +124,63 @@ def translate_bucket(category):
     }
     return bucket_map.get(category, category)
 
-def analyze_image(path):
-    data = read_bytes(path)
-    exif = get_exif(path)
-    xmp = extract_xmp(data)
-    signals = normalize_signals(exif, xmp)
-    category, confidence = heuristic_classify(signals)
-    return {
-        "file": os.path.basename(path),
-        "category_raw": category,
-        "category": translate_bucket(category),
-        "confidence": round(confidence, 2),
-        "signals": signals,
-        "actions": action_suggestions(category)
-    }
+# ---------- WEB EŞLEMESİ (OPSİYONEL) ----------
+def domain_from_url(u):
+    try:
+        netloc = urllib.parse.urlparse(u).netloc.lower()
+        if netloc.startswith("www."): netloc = netloc[4:]
+        return netloc
+    except Exception:
+        return ""
+
+def ajans_eslestirme_from_domains(domains):
+    hits = []
+    for d in domains:
+        d0 = d.lower()
+        if d0.startswith("www."): d0 = d0[4:]
+        for ajans_domain, label in AJANS_VE_MEDYA_DOMAINS.items():
+            if d0.endswith(ajans_domain):
+                hits.append((d0, label))
+    return hits
+
+def reverse_search_serpapi(image_url):
+    """Google Görseller için SerpAPI kullanımı (opsiyonel anahtar gerektirir)."""
+    if not SERPAPI_KEY:
+        return {"provider": "serpapi", "enabled": False, "domains": [], "note": "SERPAPI_KEY yok"}
+    try:
+        # SerpAPI 'google_images' engine + image_url araması
+        endpoint = "https://serpapi.com/search.json"
+        params = {"engine": "google_images", "image_url": image_url, "api_key": SERPAPI_KEY}
+        r = requests.get(endpoint, params=params, timeout=25)
+        data = r.json()
+        domains = []
+        for itm in data.get("image_results", []):
+            link = itm.get("link") or itm.get("source")
+            if link:
+                domains.append(domain_from_url(link))
+        return {"provider": "serpapi", "enabled": True, "domains": list(dict.fromkeys(domains))}
+    except Exception as e:
+        return {"provider": "serpapi", "enabled": True, "error": str(e), "domains": []}
+
+def reverse_search_tineye(image_url):
+    """TinEye Search API (opsiyonel anahtar gerektirir). *Not:* TinEye API kimlik doğrulaması aboneliğinize göre değişir."""
+    if not (TINEYE_PUBLIC_KEY and TINEYE_PRIVATE_KEY):
+        return {"provider": "tineye", "enabled": False, "domains": [], "note": "TINEYE_PUBLIC_KEY/PRIVATE_KEY yok"}
+    try:
+        # TinEye Search API için basit GET örneği (aboneliğe göre imzalama gerekebilir — resmi dokümana göre düzenleyin)
+        endpoint = "https://api.tineye.com/rest/search/"
+        params = {"image_url": image_url}
+        auth = (TINEYE_PUBLIC_KEY, TINEYE_PRIVATE_KEY)  # bazı planlarda Basic Auth
+        r = requests.get(endpoint, params=params, auth=auth, timeout=25)
+        data = r.json()
+        results = data.get("result", {}).get("matches", [])
+        domains = []
+        for m in results:
+            back = m.get("backlinks", [])
+            for b in back:
+                u = b.get("url")
+                if u:
+                    domains.append(domain_from_url(u))
+        return {"provider": "tineye", "enabled": True, "domains": list(dict.fromkeys(domains))}
+    except Exception as e:
+        return {"provider": "tineye", "enabled":
