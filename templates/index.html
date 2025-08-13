@@ -1,0 +1,38 @@
+
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Görsel Lisans Denetleyici</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>Görsel Lisans Denetleyici</h1>
+    <p>Bir görsel yükleyin; meta veriden lisans sinyallerini okuyalım ve aşağıdaki kovaya yerleştirelim:</p>
+    <ul class="buckets">
+      <li>All Rights Reserved</li>
+      <li>CC BY / CC BY-SA / CC BY-ND / CC BY-NC / CC0</li>
+      <li>Belirsiz (Web eşlemesi gerekli)</li>
+    </ul>
+
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="upload-form" id="uploadForm">
+      <input type="file" name="file" id="fileInput" accept="image/*">
+      <button type="submit">Analiz Et</button>
+    </form>
+
+    <div class="dropzone" id="dropzone">Dosyayı buraya sürükleyip bırakın</div>
+  </div>
+
+<script>
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('fileInput');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', e => { dz.classList.remove('drag'); });
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); fi.files = e.dataTransfer.files; document.getElementById('uploadForm').submit(); });
+</script>
+</body>
+</html>

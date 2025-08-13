@@ -1,0 +1,37 @@
+
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analiz Sonucu</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>Analiz Sonucu</h1>
+    <div class="card">
+      <div class="image"><img src="{{ image_url }}" alt="uploaded"></div>
+      <div class="info">
+        <p><strong>Dosya:</strong> {{ result.file }}</p>
+        <p><strong>Kategori:</strong> {{ result.category }}</p>
+        <p><strong>Güven:</strong> {{ result.confidence }}</p>
+      </div>
+    </div>
+
+    <h2>Sinyaller</h2>
+    {% if result.signals %}
+      <pre class="json">{{ result.signals | tojson(indent=2) }}</pre>
+    {% else %}
+      <p>Meta veri sinyali bulunamadı.</p>
+    {% endif %}
+
+    <h2>Önerilen Adımlar</h2>
+    <ol>
+      {% for a in result.actions %}<li>{{ a }}</li>{% endfor %}
+    </ol>
+
+    <p><a href="{{ url_for('index') }}">Yeni görsel analiz et</a></p>
+  </div>
+</body>
+</html>
