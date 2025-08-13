@@ -163,11 +163,10 @@ def reverse_search_serpapi(image_url):
         return {"provider": "serpapi", "enabled": True, "error": str(e), "domains": []}
 
 def reverse_search_tineye(image_url):
-    """TinEye Search API (opsiyonel anahtar gerektirir). *Not:* TinEye API kimlik doğrulaması aboneliğinize göre değişir."""
+    """TinEye Search API (opsiyonel anahtar gerektirir)."""
     if not (TINEYE_PUBLIC_KEY and TINEYE_PRIVATE_KEY):
         return {"provider": "tineye", "enabled": False, "domains": [], "note": "TINEYE_PUBLIC_KEY/PRIVATE_KEY yok"}
     try:
-        # TinEye Search API için basit GET örneği (aboneliğe göre imzalama gerekebilir — resmi dokümana göre düzenleyin)
         endpoint = "https://api.tineye.com/rest/search/"
         params = {"image_url": image_url}
         auth = (TINEYE_PUBLIC_KEY, TINEYE_PRIVATE_KEY)  # bazı planlarda Basic Auth
@@ -176,11 +175,70 @@ def reverse_search_tineye(image_url):
         results = data.get("result", {}).get("matches", [])
         domains = []
         for m in results:
-            back = m.get("backlinks", [])
-            for b in back:
+            for b in m.get("backlinks", []):
                 u = b.get("url")
                 if u:
                     domains.append(domain_from_url(u))
         return {"provider": "tineye", "enabled": True, "domains": list(dict.fromkeys(domains))}
     except Exception as e:
-        return {"provider": "tineye", "enabled":
+        return {"provider": "tineye", "enabled": True, "error": str(e), "domains": []}
+
+
+def analyze_image(path, public_base_url=None):
+    """public_base_url: ör. https://<host>/  -> /uploads/... ile birleşip görseli dışarıya açık URL yapar."""
+    data = read_bytes(path)
+    exif = get_exif(path)
+    xmp = extract_xmp(data)
+    signals = normalize_signals(exif, xmp)
+    category, confidence = heuristic_classify(signals)
+
+    web_insight = {"note": "web eşlemesi kapalı"}
+    ajans_hits = []
+
+    # Otomatik web eşlemesi (anahtar eklenirse çalışır)
+    if public_base_url:
+        image_url = urllib.parse.urljoin(public_base_url, "uploads/" + os.path.basename(path))
+        serp = reverse_search_serpapi(image_url)
+        tine = reverse_search_tineye(image_url)
+        collected_domains = []
+        for prov in (serp, tine):
+            if prov.get("domains"):
+                collected_domains.extend(prov["domains"])
+        collected_domains = list(dict.fromkeys([d for d in collected_domains if d]))
+        if collected_domains:
+            hits = ajans_eslestirme_from_domains(collected_domains)
+            if hits:
+                ajans_hits = [{"domain": d, "label": label} for d, label in hits]
+                # Ajans bulunduysa pratikte teliflidir
+                category = "All Rights Reserved"
+                confidence = max(confidence, 0.9)
+        web_insight = {"serpapi": serp, "tineye": tine, "domains": collected_domains}
+
+    return {
+        "file": os.path.basename(path),
+        "category_raw": category,
+        "category": translate_bucket(category),
+        "confidence": round(confidence, 2),
+        "signals": signals,
+        "actions": action_suggestions(category),
+        "web_insight": web_insight,
+        "ajans_hits": ajans_hits
+    }
+
+
+def analyze_source_url(page_url):
+    """Manuel yapıştırılan haber sayfası URL’sini alan adına göre hızlı sınıflandırır."""
+    d = domain_from_url(page_url)
+    hit = None
+    if d:
+        for ajans_domain, label in AJANS_VE_MEDYA_DOMAINS.items():
+            if d.endswith(ajans_domain):
+                hit = {"domain": d, "label": label}
+                break
+    return {
+        "input": page_url,
+        "domain": d,
+        "ajans_match": hit,
+        "category": translate_bucket("All Rights Reserved" if hit else "Belirsiz"),
+        "suggest": "Ajans/medya eşleşti, telifli kabul edin." if hit else "Eşleşme yok; sayfada lisans şartlarını kontrol edin."
+    }
